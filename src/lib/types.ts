@@ -20,6 +20,8 @@ export interface WorkSet {
   /** kg. For bodyweight exercises this is added weight (0 = none). */
   weight: number;
   reps: number;
+  /** A drop set: continues the set before it at a lower weight, without rest. */
+  drop?: boolean;
 }
 
 /** One exercise done on one day, with its sets. */
@@ -53,10 +55,20 @@ export interface RoutineDay {
   exerciseIds: string[];
 }
 
+/**
+ * A repeating plan. `pattern` is the cycle: true = training day, false = rest.
+ * Workouts fill the training days in routine order. The plan counts from your
+ * last workout, so a missed day moves everything forward.
+ */
+export interface RoutinePlan {
+  pattern: boolean[];
+}
+
 export interface Routine {
   id: string;
   name: string;
   days: RoutineDay[];
+  plan?: RoutinePlan;
   createdAt: number;
 }
 

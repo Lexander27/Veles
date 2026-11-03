@@ -4,9 +4,9 @@ import { db, startRoutineDay } from '../db';
 import { useExercises, useRoutines } from '../hooks';
 import { IconBack, IconDumbbell, IconNext, IconPlus, IconRepeat } from '../components/Icons';
 import { toast } from '../components/Toast';
-import { formatLong, formatRelative, monthGrid, monthName, parseDate, todayStr, WEEKDAY_SHORT, type DateStr } from '../lib/dates';
+import { addDays, formatLong, formatRelative, monthGrid, monthName, parseDate, todayStr, WEEKDAY_SHORT, type DateStr } from '../lib/dates';
 import { summarizeSets, validSets } from '../lib/metrics';
-import { nextWorkout } from '../lib/routines';
+import { nextWorkout, planDays } from '../lib/routines';
 import { href, Link } from '../router';
 
 export function CalendarScreen({ selected, onSelect }: { selected: DateStr; onSelect: (d: DateStr) => void }) {
@@ -18,14 +18,21 @@ export function CalendarScreen({ selected, onSelect }: { selected: DateStr; onSe
   const last = cells[cells.length - 1].date;
 
   const monthEntries = useLiveQuery(() => db.entries.where('date').between(first, last, true, true).toArray(), [first, last]);
+  const sessions = useLiveQuery(() => db.sessions.toArray(), []);
+  const { active } = useRoutines();
+  const hasPlan = !!active?.plan;
+  // 'done' = sets logged, 'added' = exercises added but not logged, 'scheduled' = on the routine plan.
   const marks = useMemo(() => {
-    const m = new Map<DateStr, 'done' | 'planned'>();
+    const m = new Map<DateStr, 'done' | 'added' | 'scheduled'>();
     for (const e of monthEntries ?? []) {
       if (validSets(e.sets).length > 0) m.set(e.date, 'done');
-      else if (!m.has(e.date)) m.set(e.date, 'planned');
+      else if (!m.has(e.date)) m.set(e.date, 'added');
+    }
+    if (active && sessions) {
+      for (const p of planDays(active, sessions, today, last)) if (!m.has(p.date)) m.set(p.date, 'scheduled');
     }
     return m;
-  }, [monthEntries]);
+  }, [monthEntries, active, sessions, today, last]);
 
   const shiftMonth = (n: number) =>
     setView((v) => {
@@ -86,13 +93,13 @@ export function CalendarScreen({ selected, onSelect }: { selected: DateStr; onSe
         <div className="cal-grid" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {cells.map((c) => {
             const mark = marks.get(c.date);
-            const cls = ['cal-day', c.inMonth ? '' : 'out', c.date === today ? 'today' : ''].join(' ');
+            const cls = ['cal-day', c.inMonth ? '' : 'out', c.date === today ? 'today' : '', mark ?? ''].join(' ');
             return (
               <button
                 key={c.date}
                 className={cls}
                 aria-pressed={c.date === selected}
-                aria-label={`${formatLong(c.date)}${mark === 'done' ? ', workout logged' : mark === 'planned' ? ', planned' : ''}`}
+                aria-label={`${formatLong(c.date)}${mark === 'done' ? ', workout logged' : mark === 'added' ? ', exercises added' : mark === 'scheduled' ? ', planned workout' : ''}`}
                 onClick={() => {
                   onSelect(c.date);
                   if (!c.inMonth) {
@@ -102,10 +109,15 @@ export function CalendarScreen({ selected, onSelect }: { selected: DateStr; onSe
                 }}
               >
                 <span className="num">{c.day}</span>
-                <span className={`dot ${mark ?? ''}`} />
+                <span className={`dot ${mark === 'added' ? 'added' : ''}`} />
               </button>
             );
           })}
+        </div>
+        <div className="cal-legend" aria-hidden="true">
+          <span><i className="sw done" /> Done</span>
+          {hasPlan && <span><i className="sw scheduled" /> Planned</span>}
+          <span><i className="sw added" /> Added, not logged</span>
         </div>
       </div>
 
@@ -128,9 +140,16 @@ function DayPanel({ date }: { date: DateStr }) {
   const sessions = useLiveQuery(() => db.sessions.toArray(), []);
   const routines = useLiveQuery(() => db.routines.toArray(), []);
 
+  const today = todayStr();
   const daySessions = (sessions ?? []).filter((s) => s.date === date);
   const next = active && sessions ? nextWorkout(active, sessions, date) : null;
-  const showNext = !!next && !daySessions.some((s) => s.routineId === active?.id);
+  const hasRoutineSession = daySessions.some((s) => s.routineId === active?.id);
+  // With a plan, today and future days show what the plan says: a workout or a rest day.
+  const plan = active?.plan && sessions && date >= today ? planDays(active, sessions, today, addDays(date, 60)) : null;
+  const planned = plan?.find((p) => p.date === date);
+  const nextPlanned = plan?.find((p) => p.date > date);
+  const isRestDay = !!plan && !planned && !hasRoutineSession && (entries?.length ?? 0) === 0;
+  const showNext = !!next && !hasRoutineSession && !isRestDay;
   const loggedSets = (entries ?? []).reduce((n, e) => n + validSets(e.sets).length, 0);
 
   const sessionLabel = (sessionId?: string) => {
@@ -141,10 +160,11 @@ function DayPanel({ date }: { date: DateStr }) {
     return r && d ? `${d.name} · ${r.name}` : null;
   };
 
+  const suggestion = planned ?? next;
   const addNext = async () => {
-    if (!active || !next) return;
-    await startRoutineDay(date, active, next.day.id);
-    toast(`${next.day.name} added`);
+    if (!active || !suggestion) return;
+    await startRoutineDay(date, active, suggestion.day.id);
+    toast(`${suggestion.day.name} added`);
   };
   const dayWord = formatRelative(date) === 'Today' ? 'today' : formatRelative(date);
 
@@ -168,39 +188,64 @@ function DayPanel({ date }: { date: DateStr }) {
         )}
       </div>
 
-      {showNext && next && active && (
+      {showNext && suggestion && active && (
         <div className="card accent" style={{ marginTop: 10, gap: 10 }}>
           <div className="between">
             <div className="stack" style={{ gap: 2 }}>
               <span className="label" style={{ color: 'var(--accent)' }}>
-                Next workout
+                {planned ? 'Planned workout' : 'Next workout'}
               </span>
-              <span className="h2">{next.day.name}</span>
+              <span className="h2">{suggestion.day.name}</span>
               <span className="small muted">
-                {active.name} · day {next.index + 1} of {active.days.length}
-                {next.last ? ` · last: ${active.days.find((d) => d.id === next.last!.dayId)?.name ?? '—'}, ${formatRelative(next.last.date)}` : ''}
+                {active.name} · workout {suggestion.index + 1} of {active.days.length}
+                {next?.last ? ` · last: ${active.days.find((d) => d.id === next.last!.dayId)?.name ?? '—'}, ${formatRelative(next.last.date)}` : ''}
               </span>
             </div>
             <span className="tile" style={{ background: '#fff' }}>
               <IconRepeat size={20} />
             </span>
           </div>
-          {next.day.exerciseIds.length > 0 && (
+          {suggestion.day.exerciseIds.length > 0 && (
             <div className="chips">
-              {next.day.exerciseIds.map((id) => byId.get(id)).filter((ex) => ex && !ex.archived).map((ex) => (
+              {suggestion.day.exerciseIds.map((id) => byId.get(id)).filter((ex) => ex && !ex.archived).map((ex) => (
                 <span key={ex!.id} className="chip" style={{ height: 30, fontSize: 13, background: '#fff', borderColor: 'transparent' }}>
                   {ex!.name}
                 </span>
               ))}
             </div>
           )}
-          <button className="btn primary block" onClick={addNext} disabled={next.day.exerciseIds.length === 0}>
+          <button className="btn primary block" onClick={addNext} disabled={suggestion.day.exerciseIds.length === 0}>
             <IconPlus size={18} /> Add to {dayWord}
           </button>
         </div>
       )}
 
-      {entries && entries.length === 0 && !showNext && (
+      {isRestDay && active && (
+        <div className="card" style={{ marginTop: 10, gap: 10 }}>
+          <div className="stack" style={{ gap: 2 }}>
+            <span className="label">Rest day</span>
+            <span className="small muted" style={{ lineHeight: 1.5 }}>
+              {nextPlanned ? (
+                <>
+                  Next planned: <strong style={{ color: 'var(--ink)' }}>{nextPlanned.day.name}</strong>, {formatRelative(nextPlanned.date, today)}.
+                </>
+              ) : (
+                'Nothing planned.'
+              )}
+            </span>
+          </div>
+          {next && next.day.exerciseIds.length > 0 && (
+            <button className="btn outline block" onClick={async () => {
+              await startRoutineDay(date, active, next.day.id);
+              toast(`${next.day.name} added. The plan moves along with you`);
+            }}>
+              Train anyway: add {next.day.name} (your next workout)
+            </button>
+          )}
+        </div>
+      )}
+
+      {entries && entries.length === 0 && !showNext && !isRestDay && (
         <div className="empty">
           <span>Nothing logged on this day.</span>
         </div>

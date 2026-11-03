@@ -2,11 +2,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { db, deleteRoutine, newId, saveRoutine, setActiveRoutine } from '../db';
 import { useExercises, useRoutines } from '../hooks';
-import { IconBack, IconCheck, IconClose, IconDown, IconPlus, IconSearch, IconTrash, IconUp } from '../components/Icons';
+import { IconBack, IconCheck, IconClose, IconDown, IconMinus, IconPlus, IconSearch, IconTrash, IconUp } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { toast } from '../components/Toast';
 import { exerciseMatches } from '../lib/importNotes';
-import type { Routine, RoutineDay } from '../lib/types';
+import { addDays, formatRelative, todayStr } from '../lib/dates';
+import { describePlan, PLAN_PRESETS, planDays, presetOf } from '../lib/routines';
+import type { Routine, RoutineDay, RoutinePlan } from '../lib/types';
 import { goBack, Link } from '../router';
 
 function move<T>(list: T[], i: number, dir: -1 | 1): T[] {
@@ -85,19 +87,19 @@ function Editor({ initial }: { initial: Routine }) {
       )}
 
       <div className="stack" style={{ gap: 12 }}>
-        <span className="label">Days in the cycle</span>
+        <span className="label">Workouts in the cycle</span>
         {r.days.map((d, i) => (
           <div key={d.id} className="card" style={{ gap: 10 }}>
             <div className="row" style={{ gap: 8 }}>
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--accent)', width: 22 }}>{i + 1}</span>
               <label className="grow">
-                <span className="sr-only">Day {i + 1} name</span>
+                <span className="sr-only">Workout {i + 1} name</span>
                 <input className="input" value={d.name} maxLength={30} onChange={(e) => updateDay(d.id, { name: e.target.value })} style={{ fontWeight: 600 }} />
               </label>
-              <button className="icon-btn ghost" aria-label={`Move day ${i + 1} up`} disabled={i === 0} style={{ opacity: i === 0 ? 0.3 : 1 }} onClick={() => update({ ...r, days: move(r.days, i, -1) })}>
+              <button className="icon-btn ghost" aria-label={`Move workout ${i + 1} up`} disabled={i === 0} style={{ opacity: i === 0 ? 0.3 : 1 }} onClick={() => update({ ...r, days: move(r.days, i, -1) })}>
                 <IconUp size={18} />
               </button>
-              <button className="icon-btn ghost" aria-label={`Move day ${i + 1} down`} disabled={i === r.days.length - 1} style={{ opacity: i === r.days.length - 1 ? 0.3 : 1 }} onClick={() => update({ ...r, days: move(r.days, i, 1) })}>
+              <button className="icon-btn ghost" aria-label={`Move workout ${i + 1} down`} disabled={i === r.days.length - 1} style={{ opacity: i === r.days.length - 1 ? 0.3 : 1 }} onClick={() => update({ ...r, days: move(r.days, i, 1) })}>
                 <IconDown size={18} />
               </button>
             </div>
@@ -128,18 +130,20 @@ function Editor({ initial }: { initial: Routine }) {
                 <button
                   className="btn plain sm"
                   style={{ color: 'var(--danger)' }}
-                  onClick={() => confirm(`Remove “${d.name}” from the cycle?`) && update({ ...r, days: r.days.filter((x) => x.id !== d.id) })}
+                  onClick={() => confirm(`Remove the workout “${d.name}” from the cycle?`) && update({ ...r, days: r.days.filter((x) => x.id !== d.id) })}
                 >
-                  Remove day
+                  Remove workout
                 </button>
               )}
             </div>
           </div>
         ))}
-        <button className="btn outline block" onClick={() => update({ ...r, days: [...r.days, { id: newId(), name: `Day ${r.days.length + 1}`, exerciseIds: [] }] })}>
-          <IconPlus size={18} /> Add day
+        <button className="btn outline block" onClick={() => update({ ...r, days: [...r.days, { id: newId(), name: `Workout ${r.days.length + 1}`, exerciseIds: [] }] })}>
+          <IconPlus size={18} /> Add workout
         </button>
       </div>
+
+      <PlanEditor routine={r} onChange={(plan) => update({ ...r, plan })} />
 
       <button className="btn primary block" style={{ height: 56 }} onClick={() => goBack('#/routines')}>
         Done
@@ -199,5 +203,121 @@ function ExercisePicker({ selected, onChange, onClose }: { selected: string[]; o
         {shown.length === 0 && <div className="empty">No matches. Create exercises in More → Exercises.</div>}
       </div>
     </Sheet>
+  );
+}
+
+function PlanEditor({ routine, onChange }: { routine: Routine; onChange: (plan: RoutinePlan | undefined) => void }) {
+  const pattern = routine.plan?.pattern;
+  const [customOpen, setCustomOpen] = useState(() => !!pattern && presetOf(pattern) === 'custom');
+  const sessions = useLiveQuery(() => db.sessions.where('routineId').equals(routine.id).toArray(), [routine.id]);
+  const mode = !pattern ? 'none' : customOpen ? 'custom' : presetOf(pattern);
+  const N = routine.days.length;
+  const today = todayStr();
+  const upcoming = pattern && sessions ? planDays(routine, sessions, today, addDays(today, 30)).slice(0, 6) : [];
+
+  const setPattern = (p: boolean[]) => onChange({ pattern: p });
+  const startCustom = () => {
+    setCustomOpen(true);
+    // Start from the current plan, or one rest day after each workout.
+    setPattern(pattern ?? Array.from({ length: Math.min(14, Math.max(2, N * 2)) }, (_, i) => i % 2 === 0));
+  };
+  const resize = (len: number) => {
+    if (!pattern || len < 1 || len > 14) return;
+    const next = Array.from({ length: len }, (_, i) => pattern[i] ?? false);
+    if (!next.some(Boolean)) next[0] = true;
+    setPattern(next);
+  };
+  const toggle = (i: number) => {
+    if (!pattern) return;
+    const next = pattern.map((v, j) => (j === i ? !v : v));
+    if (next.some(Boolean)) setPattern(next);
+    else toast('Keep at least one training day');
+  };
+
+  // Which workout lands on each day of the first cycle.
+  let k = 0;
+  const slotLabels = (pattern ?? []).map((train) => (train ? routine.days[k++ % Math.max(1, N)]?.name ?? 'Workout' : null));
+  const training = (pattern ?? []).filter(Boolean).length;
+
+  return (
+    <section className="card" style={{ gap: 12 }} aria-labelledby="plan-h">
+      <div className="stack" style={{ gap: 4 }}>
+        <h2 id="plan-h" className="h2">Plan</h2>
+        <span className="small muted" style={{ lineHeight: 1.5 }}>
+          Choose which days you train, and the calendar shows your planned workouts ahead. The plan counts from your last workout, so if you skip or move a day,
+          everything after it moves along.
+        </span>
+      </div>
+
+      <div className="chips" role="group" aria-label="Plan">
+        <button className="chip" aria-pressed={mode === 'none'} onClick={() => { setCustomOpen(false); onChange(undefined); }}>
+          No plan
+        </button>
+        {PLAN_PRESETS.map((p) => (
+          <button key={p.id} className="chip" aria-pressed={mode === p.id} onClick={() => { setCustomOpen(false); setPattern(p.pattern); }}>
+            {p.label}
+          </button>
+        ))}
+        <button className="chip" aria-pressed={mode === 'custom'} onClick={startCustom}>
+          Custom
+        </button>
+      </div>
+
+      {mode === 'none' && <span className="small muted">Without a plan, the calendar just suggests your next workout.</span>}
+
+      {mode === 'custom' && pattern && (
+        <div className="stack" style={{ gap: 10 }}>
+          <div className="between">
+            <span style={{ fontWeight: 600 }}>Cycle length</span>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="icon-btn" aria-label="Shorter cycle" onClick={() => resize(pattern.length - 1)} disabled={pattern.length <= 1}>
+                <IconMinus size={16} />
+              </button>
+              <span style={{ minWidth: 64, textAlign: 'center', fontWeight: 700 }} aria-live="polite">
+                {pattern.length} {pattern.length === 1 ? 'day' : 'days'}
+              </span>
+              <button className="icon-btn" aria-label="Longer cycle" onClick={() => resize(pattern.length + 1)} disabled={pattern.length >= 14}>
+                <IconPlus size={16} />
+              </button>
+            </div>
+          </div>
+          <span className="small muted">Tap a day to switch between training and rest.</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>
+            {pattern.map((train, i) => (
+              <button
+                key={i}
+                onClick={() => toggle(i)}
+                aria-pressed={train}
+                aria-label={`Day ${i + 1}: ${train ? slotLabels[i] : 'rest'}. Tap to switch.`}
+                style={{
+                  minHeight: 60, borderRadius: 12, padding: '8px 10px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+                  border: train ? 'none' : '1.5px dashed #c9cdd4', background: train ? 'var(--accent-soft)' : 'var(--bg)', color: train ? 'var(--accent)' : 'var(--muted)',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Day {i + 1}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{train ? slotLabels[i] : 'Rest'}</span>
+              </button>
+            ))}
+          </div>
+          {N > 0 && training !== N && (
+            <span className="small muted" style={{ lineHeight: 1.5 }}>
+              {N} {N === 1 ? 'workout' : 'workouts'} on {training} training {training === 1 ? 'day' : 'days'}: the workouts keep rotating, so each cycle starts where the last one stopped.
+            </span>
+          )}
+        </div>
+      )}
+
+      {pattern && N > 0 && (
+        <div className="stack" style={{ gap: 4 }}>
+          <span className="label">Coming up · {describePlan(pattern)}</span>
+          {upcoming.map((p) => (
+            <div key={p.date} className="between small" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <span className="muted">{formatRelative(p.date, today)}</span>
+              <span style={{ fontWeight: 600 }}>{p.day.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

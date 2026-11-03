@@ -3,7 +3,7 @@ import { db, newId, saveRoutine, setActiveRoutine } from '../db';
 import { useExercises, useRoutines } from '../hooks';
 import { IconNext, IconPlus, IconRepeat } from '../components/Icons';
 import { addDays, formatRelative, todayStr } from '../lib/dates';
-import { nextWorkout, sortSessionsDesc } from '../lib/routines';
+import { describePlan, nextWorkout, sortSessionsDesc } from '../lib/routines';
 import type { Routine } from '../lib/types';
 import { href, Link, navigate } from '../router';
 
@@ -17,7 +17,7 @@ export function RoutinesScreen() {
     const r: Routine = {
       id: newId(),
       name: `Routine ${routines.length + 1}`,
-      days: [{ id: newId(), name: 'Day 1', exerciseIds: [] }],
+      days: [{ id: newId(), name: 'Workout 1', exerciseIds: [] }],
       createdAt: Date.now(),
     };
     await saveRoutine(r);
@@ -38,8 +38,8 @@ export function RoutinesScreen() {
         <div className="card accent" style={{ gap: 10 }}>
           <span className="h2">Set up your split</span>
           <span className="small" style={{ lineHeight: 1.5 }}>
-            A routine is a cycle of workout days, like <strong>Push → Pull → Legs</strong>. After you log a day, the calendar suggests the next one as your{' '}
-            <strong>Next workout</strong>. Rest days don’t matter, the cycle only moves when you train.
+            A routine is a cycle of workouts, like <strong>Push → Pull → Legs</strong>. After you log a day, the calendar suggests the next one as your{' '}
+            <strong>Next workout</strong>. You can also give it a plan, like every 2 days, to see your workouts ahead on the calendar.
           </span>
           <button className="btn primary" onClick={create}>
             <IconPlus size={18} /> Create a routine
@@ -63,7 +63,8 @@ export function RoutinesScreen() {
                   <div className="stack" style={{ gap: 2 }}>
                     <span style={{ fontWeight: 700, fontSize: 17 }}>{r.name}</span>
                     <span className="small muted">
-                      {r.days.length} {r.days.length === 1 ? 'day' : 'days'}
+                      {r.days.length} {r.days.length === 1 ? 'workout' : 'workouts'}
+                      {r.plan ? ` · ${describePlan(r.plan.pattern)}` : ''}
                       {last ? ` · last trained ${formatRelative(last.date).toLowerCase() === 'today' ? 'today' : formatRelative(last.date)}` : ''}
                     </span>
                   </div>

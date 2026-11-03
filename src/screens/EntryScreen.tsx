@@ -4,24 +4,33 @@ import { db, deleteEntry, updateNote, updateSets } from '../db';
 import { IconBack, IconChart, IconClock, IconCopy, IconPlus, IconStar, IconTrash } from '../components/Icons';
 import { toast } from '../components/Toast';
 import { formatLong, formatShort } from '../lib/dates';
-import { estimate1RM, formatNumber, formatSet, parseNumberInput, setMetric, summarizeSets, validSets } from '../lib/metrics';
+import { formatNumber, formatSets, parseNumberInput, setMetric, summarizeSets, validSets } from '../lib/metrics';
 import type { Entry, Exercise, WorkSet } from '../lib/types';
 import { goBack, href, Link } from '../router';
 
 interface Row {
   weight: string;
   reps: string;
+  drop?: boolean;
 }
 
 const toRows = (sets: WorkSet[]): Row[] =>
-  sets.map((s) => ({ weight: s.weight ? String(s.weight) : '', reps: s.reps ? String(s.reps) : '' }));
+  sets.map((s) => ({ weight: s.weight ? String(s.weight) : '', reps: s.reps ? String(s.reps) : '', drop: s.drop || undefined }));
 
 function toSets(rows: Row[]): WorkSet[] {
-  return rows.map((r) => {
+  return rows.map((r, i) => {
     const w = parseNumberInput(r.weight);
     const reps = parseNumberInput(r.reps);
-    return { weight: Number.isFinite(w) && w > 0 ? w : 0, reps: Number.isFinite(reps) && reps > 0 ? Math.round(reps) : 0 };
+    const set: WorkSet = { weight: Number.isFinite(w) && w > 0 ? w : 0, reps: Number.isFinite(reps) && reps > 0 ? Math.round(reps) : 0 };
+    if (r.drop && i > 0) set.drop = true;
+    return set;
   });
+}
+
+/** Set numbers that skip drop rows: [1, 2, null, 3] */
+function setNumbers(rows: Row[]): Array<number | null> {
+  let n = 0;
+  return rows.map((r, i) => (r.drop && i > 0 ? null : ++n));
 }
 
 export function EntryScreen({ id }: { id: string }) {
@@ -95,11 +104,24 @@ function EntryEditor({ entry, exercise }: { entry: Entry; exercise: Exercise }) 
     setRows((rs) => {
       const prev = rs[rs.length - 1];
       const fromLast = last?.sets[rs.length];
-      const seed = prev && (prev.weight || prev.reps) ? prev : fromLast ? toRows([fromLast])[0] : { weight: '', reps: '' };
-      return [...rs, { ...seed }];
+      // Copy the last main set (not a drop), or what you did last time.
+      const prevMain = [...rs].reverse().find((r) => !r.drop);
+      const seed = prevMain && (prevMain.weight || prevMain.reps) ? prevMain : prev && (prev.weight || prev.reps) ? prev : fromLast ? toRows([fromLast])[0] : { weight: '', reps: '' };
+      return [...rs, { weight: seed.weight, reps: seed.reps }];
     });
   };
-  const removeRow = (i: number) => setRows((rs) => (rs.length === 1 ? [{ weight: '', reps: '' }] : rs.filter((_, j) => j !== i)));
+  const addDrop = () => {
+    focusNew.current = true;
+    setRows((rs) => [...rs, { weight: '', reps: '', drop: true }]);
+  };
+  const removeRow = (i: number) =>
+    setRows((rs) => {
+      if (rs.length === 1) return [{ weight: '', reps: '' }];
+      const next = rs.filter((_, j) => j !== i);
+      if (next[0]?.drop) next[0] = { ...next[0], drop: undefined };
+      return next;
+    });
+  const nums = setNumbers(rows);
   const copyLast = () => last && setRows(toRows(last.sets.filter((s) => s.reps > 0)));
   const isEmpty = rows.every((r) => !r.weight && !r.reps);
 
@@ -126,7 +148,7 @@ function EntryEditor({ entry, exercise }: { entry: Entry; exercise: Exercise }) 
     goBack();
   };
 
-  const best = validSets(sets).length ? Math.max(...validSets(sets).map((s) => estimate1RM(s.weight, s.reps))) : 0;
+  const best = validSets(sets).length ? setMetric(sets, 'e1rm') ?? 0 : 0;
 
   return (
     <div className="screen no-tabs" style={{ gap: 18 }}>
@@ -156,7 +178,7 @@ function EntryEditor({ entry, exercise }: { entry: Entry; exercise: Exercise }) 
           <IconClock size={20} style={{ color: 'var(--muted)', flexShrink: 0 }} />
           <div className="grow small" style={{ lineHeight: 1.4 }}>
             <span className="muted">Last time ({formatShort(last.date, false)}):</span>{' '}
-            <strong>{validSets(last.sets).map((s) => formatSet(s, exercise.kind)).join(', ')}</strong>
+            <strong>{formatSets(last.sets, exercise.kind)}</strong>
           </div>
           {isEmpty && (
             <button className="btn soft sm" onClick={copyLast}>
@@ -173,40 +195,48 @@ function EntryEditor({ entry, exercise }: { entry: Entry; exercise: Exercise }) 
           <span style={{ textAlign: 'center' }}>Reps</span>
           <span />
         </div>
-        {rows.map((r, i) => (
-          <div className="set-row" key={i}>
-            <span className="n">{i + 1}</span>
-            <label>
-              <span className="sr-only">Set {i + 1} {bw ? 'added weight' : 'weight'} in kg</span>
-              <input
-                className="input"
-                inputMode="decimal"
-                enterKeyHint="next"
-                placeholder={bw ? '0' : last?.sets[i] ? formatNumber(last.sets[i].weight) : 'kg'}
-                value={r.weight}
-                ref={i === rows.length - 1 ? lastInput : undefined}
-                onChange={(e) => setRow(i, { weight: e.target.value.replace(/[^0-9.,]/g, '') })}
-              />
-            </label>
-            <label>
-              <span className="sr-only">Set {i + 1} reps</span>
-              <input
-                className="input"
-                inputMode="numeric"
-                enterKeyHint="done"
-                placeholder={last?.sets[i] ? String(last.sets[i].reps) : 'reps'}
-                value={r.reps}
-                onChange={(e) => setRow(i, { reps: e.target.value.replace(/[^0-9]/g, '') })}
-              />
-            </label>
-            <button className="icon-btn ghost" aria-label={`Delete set ${i + 1}`} onClick={() => removeRow(i)} style={{ color: 'var(--muted)' }}>
-              <IconTrash size={18} />
-            </button>
-          </div>
-        ))}
-        <button className="btn plain" onClick={addRow} style={{ alignSelf: 'center' }}>
-          <IconPlus size={18} /> Add set
-        </button>
+        {rows.map((r, i) => {
+          const label = nums[i] === null ? `Drop set after set ${[...nums.slice(0, i)].reverse().find((n) => n !== null)}` : `Set ${nums[i]}`;
+          return (
+            <div className={`set-row${nums[i] === null ? ' drop' : ''}`} key={i}>
+              <span className="n">{nums[i] ?? <span className="drop-tag">↳ drop</span>}</span>
+              <label>
+                <span className="sr-only">{label} {bw ? 'added weight' : 'weight'} in kg</span>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  enterKeyHint="next"
+                  placeholder={bw ? '0' : last?.sets[i] ? formatNumber(last.sets[i].weight) : 'kg'}
+                  value={r.weight}
+                  ref={i === rows.length - 1 ? lastInput : undefined}
+                  onChange={(e) => setRow(i, { weight: e.target.value.replace(/[^0-9.,]/g, '') })}
+                />
+              </label>
+              <label>
+                <span className="sr-only">{label} reps</span>
+                <input
+                  className="input"
+                  inputMode="numeric"
+                  enterKeyHint="done"
+                  placeholder={last?.sets[i] ? String(last.sets[i].reps) : 'reps'}
+                  value={r.reps}
+                  onChange={(e) => setRow(i, { reps: e.target.value.replace(/[^0-9]/g, '') })}
+                />
+              </label>
+              <button className="icon-btn ghost" aria-label={`Delete ${label.toLowerCase()}`} onClick={() => removeRow(i)} style={{ color: 'var(--muted)' }}>
+                <IconTrash size={18} />
+              </button>
+            </div>
+          );
+        })}
+        <div className="row" style={{ justifyContent: 'center', gap: 4 }}>
+          <button className="btn plain" onClick={addRow}>
+            <IconPlus size={18} /> Add set
+          </button>
+          <button className="btn plain" onClick={addDrop} disabled={isEmpty} title="A lighter set straight after the one before it">
+            <IconPlus size={18} /> Add drop set
+          </button>
+        </div>
       </div>
 
       {prs.length > 0 && (
