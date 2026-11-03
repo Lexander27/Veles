@@ -108,3 +108,24 @@ describe('name matching', () => {
     expect(guessMuscle('Something odd')).toBe('Other');
   });
 });
+
+describe('drop sets', () => {
+  it('reads "9x5drop6.8x3" as a set followed by a drop set', () => {
+    const l = parseExerciseLine('Bicep pull 6.8x10 9x5drop6.8x3 9x7drop6.8x2');
+    expect(l.name).toBe('Bicep pull');
+    expect(l.problem).toBeUndefined();
+    expect(l.sets).toEqual([
+      { weight: 6.8, reps: 10 },
+      { weight: 9, reps: 5 },
+      { weight: 6.8, reps: 3, drop: true },
+      { weight: 9, reps: 7 },
+      { weight: 6.8, reps: 2, drop: true },
+    ]);
+  });
+
+  it('handles spaces, chains and capitals, and keeps "drop" in names', () => {
+    expect(parseExerciseLine('Curl 10x8 DROP 8x6 drop 6x5').sets.map((s) => !!s.drop)).toEqual([false, true, true]);
+    expect(parseExerciseLine('Drop curl 10x8').name).toBe('Drop curl');
+    expect(parseExerciseLine('Curl 10x8 drop').problem).toMatch(/drop/);
+  });
+});

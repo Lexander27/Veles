@@ -79,16 +79,24 @@ export function parseExerciseLine(raw: string): ParsedLine {
   // Tidy "25 x 12", "25kg×12", "25*12" into "25x12".
   const tidy = text
     .replace(/(\d|bw)\s*(?:kg)?\s*[x×*]\s*(?=\d)/gi, '$1x')
+    // "9x5drop6.8x3" → "9x5 drop 6.8x3"
+    .replace(/(\d)\s*drop\s*(?=\d|bw)/gi, '$1 drop ')
     .replace(/[–—]/g, ' ')
     .trim();
   const tokens = tidy.split(/[\s;]+|,\s+/).filter(Boolean);
   const nameParts: string[] = [];
   const sets: WorkSet[] = [];
   const leftovers: string[] = [];
+  let dropNext = false;
   for (const t of tokens) {
     const m = SET_RE.exec(t.replace(/,$/, ''));
     if (m) {
-      sets.push({ weight: m[1] ? Number(m[1].replace(',', '.')) : 0, reps: Number(m[2]) });
+      const set: WorkSet = { weight: m[1] ? Number(m[1].replace(',', '.')) : 0, reps: Number(m[2]) };
+      if (dropNext) set.drop = true;
+      dropNext = false;
+      sets.push(set);
+    } else if (sets.length > 0 && /^drop$/i.test(t)) {
+      dropNext = true;
     } else if (sets.length === 0) {
       nameParts.push(t);
     } else {
@@ -100,6 +108,7 @@ export function parseExerciseLine(raw: string): ParsedLine {
   if (sets.length === 0 && name) problem = 'No sets found (expected something like 50x10)';
   else if (sets.length > 0 && !name) problem = 'Sets without an exercise name';
   else if (leftovers.length) problem = `Couldn't read “${leftovers.join(' ')}”`;
+  else if (dropNext) problem = '“drop” at the end without a weight x reps after it';
   if (!name && sets.length === 0 && notes.length === 0) problem = 'Couldn’t read this line';
   return { raw, name, sets, notes, problem };
 }

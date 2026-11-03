@@ -103,3 +103,57 @@ describe('routine cycle', () => {
     expect(nextWorkout({ ...routine, days: [] }, [], '2026-11-03')).toBeNull();
   });
 });
+
+import { formatSets, setMetric } from './metrics';
+import { describePlan, planDays } from './routines';
+
+describe('drop set metrics', () => {
+  const sets = [
+    { weight: 9, reps: 5 },
+    { weight: 6.8, reps: 3, drop: true },
+    { weight: 9, reps: 7 },
+    { weight: 6.8, reps: 2, drop: true },
+  ];
+  it('counts drops in volume but not as separate sets or best sets', () => {
+    expect(setMetric(sets, 'volume')).toBeCloseTo(9 * 5 + 6.8 * 3 + 9 * 7 + 6.8 * 2);
+    expect(setMetric([{ weight: 50, reps: 3 }, { weight: 40, reps: 15, drop: true }], 'e1rm')).toBeCloseTo(55);
+    expect(summarizeSets(sets, 'weight')).toBe('2 sets (+2 drops) · top 9 kg × 7');
+    expect(formatSets(sets, 'weight')).toBe('9 kg × 5 → 6.8 kg × 3, 9 kg × 7 → 6.8 kg × 2');
+  });
+});
+
+describe('routine plan', () => {
+  const days = ['w1', 'w2', 'w3', 'w4'].map((id) => ({ id, name: id.toUpperCase(), exerciseIds: [] }));
+  // 6-day cycle: W1, rest, W2, W3, rest, W4
+  const routine: Routine = { id: 'r', name: 'R', createdAt: 0, days, plan: { pattern: [true, false, true, true, false, true] } };
+  const s = (date: string, dayId: string): Session => ({ id: date, date, dayId, routineId: 'r', createdAt: 0 });
+  const plan = (sessions: Session[], today: string, until: string) => planDays(routine, sessions, today, until).map((p) => `${p.date.slice(8)}:${p.day.id}`);
+
+  it('lays the cycle out from today when nothing is logged', () => {
+    expect(plan([], '2026-11-02', '2026-11-08')).toEqual(['02:w1', '04:w2', '05:w3', '07:w4', '08:w1']);
+  });
+
+  it('counts from the last workout', () => {
+    expect(plan([s('2026-11-02', 'w1')], '2026-11-02', '2026-11-08')).toEqual(['04:w2', '05:w3', '07:w4', '08:w1']);
+  });
+
+  it('shifts when a workout is late: done Thursday instead of Wednesday', () => {
+    // W2 was planned for the 4th but done on the 5th, so W3 moves to the 6th.
+    expect(plan([s('2026-11-02', 'w1'), s('2026-11-05', 'w2')], '2026-11-05', '2026-11-09')).toEqual(['06:w3', '08:w4', '09:w1']);
+  });
+
+  it('moves an overdue workout to today, and never plans the past', () => {
+    expect(plan([s('2026-11-02', 'w1')], '2026-11-07', '2026-11-09')).toEqual(['07:w2', '08:w3']);
+  });
+
+  it('every 2 days rotates through all workouts', () => {
+    const r2 = { ...routine, plan: { pattern: [true, false] } };
+    expect(planDays(r2, [], '2026-11-02', '2026-11-10').map((p) => p.day.id)).toEqual(['w1', 'w2', 'w3', 'w4', 'w1']);
+    expect(describePlan([true, false])).toBe('Every 2 days');
+    expect(describePlan(routine.plan!.pattern)).toBe('6-day cycle · 4 training days');
+  });
+
+  it('has no plan without a pattern', () => {
+    expect(planDays({ ...routine, plan: undefined }, [], '2026-11-02', '2026-11-30')).toEqual([]);
+  });
+});

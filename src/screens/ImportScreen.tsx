@@ -1,11 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { db, runImport, undoImport, type ImportPlan } from '../db';
 import { useExercises } from '../hooks';
 import { IconBack, IconCheck, IconEdit } from '../components/Icons';
 import { toast } from '../components/Toast';
 import { formatLong, parseDate } from '../lib/dates';
-import { formatNumber } from '../lib/metrics';
+import { formatNumber, groupSets } from '../lib/metrics';
 import { guessMuscle, nameIndex, nameKey, parseDayBlock, parseNotes, type ParsedDay } from '../lib/importNotes';
 import { MUSCLE_GROUPS, type Exercise, type ImportRecord, type WorkSet } from '../lib/types';
 import { goBack, href, Link, navigate } from '../router';
@@ -35,7 +35,8 @@ function saveDraft(t: string) {
   }
 }
 
-const setsText = (sets: WorkSet[]) => sets.map((s) => `${s.weight ? formatNumber(s.weight) : 'BW'}×${s.reps}`).join('  ');
+const setText = (s: WorkSet) => `${s.weight ? formatNumber(s.weight) : 'BW'}×${s.reps}`;
+const setsText = (sets: WorkSet[]) => groupSets(sets).map((g) => g.map(setText).join(' → ')).join('   ');
 
 export function ImportScreen() {
   const { list: exercises, byId } = useExercises();
@@ -49,6 +50,19 @@ export function ImportScreen() {
   const [editing, setEditing] = useState<{ key: string; text: string } | null>(null);
   const [result, setResult] = useState<ImportRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  // Jumping around the review: which day/name to highlight, and where "Show day" cycles to.
+  const [highlight, setHighlight] = useState<{ day: string; name?: string } | null>(null);
+  const [jumpedDay, setJumpedDay] = useState<string | null>(null);
+  const nameCursor = useRef<Record<string, number>>({});
+  const lastFlagged = useRef<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const jumpTo = (id: string, hl: { day: string; name?: string } | null) => {
+    setHighlight(hl);
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlight(null), 2500);
+    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   const index = useMemo(() => nameIndex(exercises), [exercises]);
   const decisionOf = (d: ParsedDay): Decision | undefined => decisions[d.key] ?? (d.reasons.length ? undefined : 'import');
@@ -295,7 +309,7 @@ export function ImportScreen() {
 
       {names.size > 0 && (
         <section className="stack" style={{ gap: 0 }} aria-labelledby="names-h">
-          <h2 id="names-h" className="label" style={{ paddingBottom: 4 }}>
+          <h2 id="names-h" className="label" style={{ paddingBottom: 4, scrollMarginTop: 16 }}>
             Exercises · {newCount} new
           </h2>
           {[...names.entries()].sort((a, b) => a[1].display.localeCompare(b[1].display)).map(([k, v]) => {
@@ -308,7 +322,19 @@ export function ImportScreen() {
               <div key={k} className="stack" style={{ gap: 8, padding: '12px 0', borderBottom: '1px solid var(--line-soft)' }}>
                 <div className="between">
                   <span style={{ fontWeight: 600 }}>{v.display}</span>
-                  <span className="small muted">{v.days.size} {v.days.size === 1 ? 'day' : 'days'}</span>
+                  <button
+                    className="btn plain sm"
+                    style={{ padding: 0, height: 32 }}
+                    onClick={() => {
+                      const list = [...v.days];
+                      const i = (nameCursor.current[k] ?? 0) % list.length;
+                      nameCursor.current[k] = i + 1;
+                      setJumpedDay(list[i]);
+                      jumpTo(`day-${list[i]}`, { day: list[i], name: k });
+                    }}
+                  >
+                    {v.days.size === 1 ? 'Show day' : `Show day ${((nameCursor.current[k] ?? 0) % v.days.size) + 1} of ${v.days.size}`} ↓
+                  </button>
                 </div>
                 <label className="field">
                   <span className="sr-only">What is “{v.display}”?</span>
@@ -377,7 +403,19 @@ export function ImportScreen() {
             const dec = decisionOf(d);
             const flagged = d.reasons.length > 0;
             return (
-              <div key={d.key} className="card" style={{ gap: 10, opacity: dec === 'skip' ? 0.6 : 1, borderColor: flagged && !dec ? 'var(--warn)' : undefined }}>
+              <div
+                key={d.key}
+                id={`day-${d.key}`}
+                className="card"
+                style={{
+                  gap: 10,
+                  scrollMarginTop: 16,
+                  opacity: dec === 'skip' ? 0.6 : 1,
+                  borderColor: highlight?.day === d.key ? 'var(--accent)' : flagged && !dec ? 'var(--warn)' : undefined,
+                  boxShadow: highlight?.day === d.key ? '0 0 0 3px var(--accent-soft)' : undefined,
+                  transition: 'box-shadow 0.3s, border-color 0.3s',
+                }}
+              >
                 <div className="between">
                   <span style={{ fontWeight: 700 }}>{d.date ? `${formatLong(d.date)} ${parseDate(d.date).getFullYear()}` : d.dateText}</span>
                   {dec === 'skip' ? <span className="badge gray">Skipped</span> : flagged && !dec ? <span className="badge" style={{ color: 'var(--warn)', background: 'var(--warn-soft)' }}>Needs a decision</span> : null}
@@ -423,10 +461,12 @@ export function ImportScreen() {
                       }
                       const r = resolve(nameKey(l.name));
                       const dup = isDuplicate(d.date, r);
+                      const lit = highlight?.day === d.key && highlight.name === nameKey(l.name);
                       return (
-                        <div key={i} className="stack" style={{ gap: 1 }}>
+                        <div key={i} className="stack" style={{ gap: 1, borderRadius: 8, margin: '0 -8px', padding: '2px 8px', background: lit ? 'var(--accent-soft)' : undefined, transition: 'background 0.3s' }}>
                           <span className="small" style={{ fontWeight: 600 }}>
                             {resolvedName(r)}
+                            {nameKey(resolvedName(r)) !== nameKey(l.name) && <span className="muted" style={{ fontWeight: 400 }}> (written “{l.name}”)</span>}
                             {dup && <span className="muted" style={{ fontWeight: 400 }}> · already logged, skipped</span>}
                           </span>
                           <span className="small muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{setsText(l.sets)}</span>
@@ -453,6 +493,11 @@ export function ImportScreen() {
                     </button>
                   </div>
                 )}
+                {jumpedDay === d.key && editing?.key !== d.key && (
+                  <button className="btn plain sm" style={{ alignSelf: 'flex-start', padding: 0, height: 28 }} onClick={() => { setJumpedDay(null); jumpTo('names-h', null); }}>
+                    ↑ Back to exercise names
+                  </button>
+                )}
               </div>
             );
           })}
@@ -461,13 +506,27 @@ export function ImportScreen() {
 
       {days.length > 0 && (
         <div className="stack" style={{ position: 'sticky', bottom: 0, background: 'var(--bg)', padding: '12px 0 calc(var(--safe-bottom) + 12px)', margin: '0 0 -32px', borderTop: '1px solid var(--line)' }}>
-          <button className="btn primary block" style={{ height: 56 }} disabled={busy || undecided > 0 || entriesCount === 0 || !!editing} onClick={doImport}>
-            {undecided > 0
-              ? `Decide on ${undecided} flagged ${undecided === 1 ? 'day' : 'days'} first`
-              : entriesCount === 0
+          {undecided > 0 ? (
+            <button
+              className="btn block"
+              style={{ height: 56, background: 'var(--warn-soft)', color: 'var(--warn)' }}
+              onClick={() => {
+                const flagged = days.filter((d) => decisionOf(d) === undefined);
+                const at = flagged.findIndex((d) => d.key === lastFlagged.current);
+                const next = flagged[(at + 1) % flagged.length];
+                lastFlagged.current = next.key;
+                jumpTo(`day-${next.key}`, { day: next.key });
+              }}
+            >
+              Next flagged day ↓ ({undecided} to decide)
+            </button>
+          ) : (
+          <button className="btn primary block" style={{ height: 56 }} disabled={busy || entriesCount === 0 || !!editing} onClick={doImport}>
+            {entriesCount === 0
                 ? 'Nothing to import'
                 : `Import ${entriesCount} exercises on ${new Set(included.map((d) => d.date)).size} days`}
           </button>
+          )}
         </div>
       )}
     </div>
