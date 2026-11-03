@@ -1,6 +1,6 @@
 # Veles: workout tracker plan
 
-Status: **planning**. Waiting on a design choice (A / B / C, or a mix) and answers to the open questions below.
+Status: **v1 built**, using design B (Paper). Decisions: Android first, offline, data only on the phone, kg, weeks start on Monday, weights only for now (running maybe later), English, name Veles.
 
 ## Goal
 
@@ -65,6 +65,14 @@ Three directions, each shown on a home/calendar screen, a logging screen and a p
 - **B · Paper:** light and minimal with a blue accent. The full month calendar is the home screen, and exercises are added from a bottom sheet.
 - **C · Blocks:** playful coloured cards: streak, weekly goal, mini calendar, today's plan, big set steppers.
 
-## Open questions
+## Done in v1
 
-See the conversation. They cover platform, units, metrics, sync, routines and language.
+- Calendar home with a next-workout card, an add-exercise sheet (routine days, recent, search, create new), and set logging.
+- Routines with a cycle: the next workout is the day after the last one logged, wrapping around.
+- Progress graph: top weight / est. 1RM / volume (max reps / total reps for bodyweight), 1M–All ranges, drag or arrows to move, tap a point for value and date.
+- Exercise library (edit, archive), JSON backup export/import, storage persistence, offline service worker.
+
+## Next up
+
+- Make the home calendar more compact (the user said it's a bit too big).
+- Rest timer, running/cardio exercises, optional desktop use (still offline).
