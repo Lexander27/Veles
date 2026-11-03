@@ -55,7 +55,7 @@ export function AddSheet({ date }: { date: DateStr }) {
   };
 
   return (
-    <Sheet label={`Add exercise to ${formatLong(date)}`} onClose={() => goBack()}>
+    <Sheet tall label={`Add exercise to ${formatLong(date)}`} onClose={() => goBack()}>
       <div className="between">
         <div className="stack" style={{ gap: 2 }}>
           <h1 className="h2" style={{ fontSize: 22 }}>{creating ? 'New exercise' : 'Add exercise'}</h1>
