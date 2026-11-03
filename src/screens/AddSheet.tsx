@@ -9,6 +9,7 @@ import { toast } from '../components/Toast';
 import { formatLong, type DateStr } from '../lib/dates';
 import { MUSCLE_GROUPS, type Exercise } from '../lib/types';
 import { nextWorkout } from '../lib/routines';
+import { exerciseMatches } from '../lib/importNotes';
 import { goBack, href, navigate } from '../router';
 
 export function AddSheet({ date }: { date: DateStr }) {
@@ -27,7 +28,7 @@ export function AddSheet({ date }: { date: DateStr }) {
 
   const visible = list.filter((e) => !e.archived);
   const q = query.trim().toLowerCase();
-  const matches = q ? visible.filter((e) => e.name.toLowerCase().includes(q) || e.muscle.toLowerCase().includes(q)) : visible;
+  const matches = q ? visible.filter((e) => exerciseMatches(e, q)) : visible;
   const groups = useMemo(() => {
     const order = [...MUSCLE_GROUPS] as string[];
     const map = new Map<string, Exercise[]>();

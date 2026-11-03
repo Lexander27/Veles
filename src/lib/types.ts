@@ -10,6 +10,10 @@ export interface Exercise {
   kind: ExerciseKind;
   archived: boolean;
   createdAt: number;
+  /** Other names for the same exercise ("also known as"). Used when matching imported notes. */
+  aliases?: string[];
+  /** Set when the exercise was created by an import (so the import can be undone). */
+  importId?: string;
 }
 
 export interface WorkSet {
@@ -28,7 +32,19 @@ export interface Entry {
   note?: string;
   /** Set when the entry was added as part of a routine day. */
   sessionId?: string;
+  /** Set when the entry came from "Import from notes". */
+  importId?: string;
   createdAt: number;
+}
+
+/** A record of one notes import, kept so it can be undone. */
+export interface ImportRecord {
+  id: string;
+  at: number;
+  days: number;
+  entries: number;
+  createdExerciseIds: string[];
+  addedAliases: Array<{ exerciseId: string; alias: string }>;
 }
 
 export interface RoutineDay {

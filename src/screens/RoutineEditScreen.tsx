@@ -5,6 +5,7 @@ import { useExercises, useRoutines } from '../hooks';
 import { IconBack, IconCheck, IconClose, IconDown, IconPlus, IconSearch, IconTrash, IconUp } from '../components/Icons';
 import { Sheet } from '../components/Sheet';
 import { toast } from '../components/Toast';
+import { exerciseMatches } from '../lib/importNotes';
 import type { Routine, RoutineDay } from '../lib/types';
 import { goBack, Link } from '../router';
 
@@ -159,7 +160,7 @@ function ExercisePicker({ selected, onChange, onClose }: { selected: string[]; o
   const { list } = useExercises();
   const [q, setQ] = useState('');
   const query = q.trim().toLowerCase();
-  const shown = list.filter((e) => !e.archived && (!query || e.name.toLowerCase().includes(query) || e.muscle.toLowerCase().includes(query)));
+  const shown = list.filter((e) => !e.archived && exerciseMatches(e, query));
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (

@@ -1,9 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
-import { db, exportBackup, importBackup } from '../db';
-import { IconDownload, IconDumbbell, IconNext, IconUpload } from '../components/Icons';
+import { db, deleteAllWorkouts, exportBackup, importBackup, resetEverything, undoImport } from '../db';
+import { IconDownload, IconDumbbell, IconEdit, IconNext, IconUpload } from '../components/Icons';
 import { toast } from '../components/Toast';
-import { formatShort, todayStr } from '../lib/dates';
+import { formatShort, toDateStr, todayStr } from '../lib/dates';
+import type { ImportRecord } from '../lib/types';
 import { href, Link } from '../router';
 
 export function MoreScreen() {
@@ -13,6 +14,7 @@ export function MoreScreen() {
     days: new Set((await db.entries.toArray()).map((e) => e.date)).size,
   }), []);
   const lastBackup = useLiveQuery(() => db.meta.get('lastBackup').then((m) => (m?.value as string | undefined) ?? null), []);
+  const imports = useLiveQuery(() => db.meta.get('imports').then((m) => (m?.value as ImportRecord[] | undefined) ?? []), []);
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -48,7 +50,7 @@ export function MoreScreen() {
   const doImport = async (file: File) => {
     try {
       const data = JSON.parse(await file.text());
-      if (!confirm('Replace ALL data on this phone with this backup? This cannot be undone.')) return;
+      if (!confirm('Restore this backup? It replaces ALL data on this phone. This cannot be undone.')) return;
       await importBackup(data);
       toast('Backup restored');
     } catch (e) {
@@ -77,7 +79,41 @@ export function MoreScreen() {
           </span>
           <IconNext size={18} style={{ color: '#9aa0ab' }} />
         </Link>
+        <Link className="list-row" to={href('import')}>
+          <span className="tile">
+            <IconEdit size={20} />
+          </span>
+          <span className="stack grow" style={{ gap: 2 }}>
+            <span className="title">Import from notes</span>
+            <span className="sub">Paste old workouts, like “Lat pulldown 50x10”</span>
+          </span>
+          <IconNext size={18} style={{ color: '#9aa0ab' }} />
+        </Link>
       </div>
+
+      {imports && imports.length > 0 && (
+        <section className="stack" style={{ gap: 0 }} aria-labelledby="imports-h">
+          <h2 id="imports-h" className="label" style={{ paddingBottom: 4 }}>Recent imports</h2>
+          {imports.map((r) => (
+            <div key={r.id} className="list-row" style={{ minHeight: 56 }}>
+              <span className="stack grow" style={{ gap: 1 }}>
+                <span style={{ fontWeight: 500 }}>{r.entries} exercises on {r.days} days</span>
+                <span className="small muted">Imported {formatShort(toDateStr(new Date(r.at)))}</span>
+              </span>
+              <button
+                className="btn danger sm"
+                onClick={async () => {
+                  if (!confirm(`Undo this import? Its ${r.entries} exercises on ${r.days} days will be removed, including any changes you made to them.`)) return;
+                  await undoImport(r.id);
+                  toast('Import undone');
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="card" style={{ gap: 12 }} aria-labelledby="backup-h">
         <h2 id="backup-h" className="h2">Backup</h2>
@@ -91,7 +127,7 @@ export function MoreScreen() {
             <IconDownload size={18} /> Export
           </button>
           <button className="btn outline grow" onClick={() => fileInput.current?.click()}>
-            <IconUpload size={18} /> Import
+            <IconUpload size={18} /> Restore
           </button>
           <input
             ref={fileInput}
@@ -119,6 +155,33 @@ export function MoreScreen() {
             Protect my data
           </button>
         )}
+      </section>
+
+      <section className="card" style={{ gap: 10 }} aria-labelledby="delete-h">
+        <h2 id="delete-h" className="h2">Delete data</h2>
+        <span className="small muted" style={{ lineHeight: 1.5 }}>Export a backup first if you might want it back. These can’t be undone.</span>
+        <button
+          className="btn danger block"
+          onClick={async () => {
+            if (!confirm('Delete ALL logged workouts? Your exercises and routines stay.')) return;
+            if (!confirm('Are you sure? Every workout and all progress will be gone.')) return;
+            await deleteAllWorkouts();
+            toast('All workouts deleted');
+          }}
+        >
+          Delete all workouts
+        </button>
+        <button
+          className="btn danger block"
+          onClick={async () => {
+            if (!confirm('Reset Veles? Workouts, routines and your own exercises will all be deleted, like a fresh install.')) return;
+            if (!confirm('Are you sure? This deletes everything.')) return;
+            await resetEverything();
+            toast('Veles has been reset');
+          }}
+        >
+          Reset everything
+        </button>
       </section>
 
       <p className="small muted" style={{ textAlign: 'center' }}>Veles v{__APP_VERSION__} · works offline</p>
