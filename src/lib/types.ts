@@ -64,11 +64,20 @@ export interface RoutinePlan {
   pattern: boolean[];
 }
 
+/** "My next workout is X": set by hand, it wins over the cycle until you train again. */
+export interface NextOverride {
+  dayId: string;
+  /** The day it was set for (today, or the past day being logged). */
+  date: DateStr;
+  setAt: number;
+}
+
 export interface Routine {
   id: string;
   name: string;
   days: RoutineDay[];
   plan?: RoutinePlan;
+  next?: NextOverride;
   createdAt: number;
 }
 

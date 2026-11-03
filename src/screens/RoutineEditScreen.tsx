@@ -7,7 +7,7 @@ import { Sheet } from '../components/Sheet';
 import { toast } from '../components/Toast';
 import { exerciseMatches } from '../lib/importNotes';
 import { addDays, formatRelative, todayStr } from '../lib/dates';
-import { describePlan, PLAN_PRESETS, planDays, presetOf } from '../lib/routines';
+import { describePlan, nextWorkout, PLAN_PRESETS, planDays, presetOf } from '../lib/routines';
 import type { Routine, RoutineDay, RoutinePlan } from '../lib/types';
 import { goBack, Link } from '../router';
 
@@ -49,6 +49,9 @@ function Editor({ initial }: { initial: Routine }) {
     update({ ...r, days: r.days.map((d) => (d.id === dayId ? { ...d, ...patch } : d)) });
 
   const isActive = active?.id === r.id;
+  const sessions = useLiveQuery(() => db.sessions.where('routineId').equals(r.id).toArray(), [r.id]);
+  // What's next from now on (a workout already logged today counts as done).
+  const nextNow = sessions ? nextWorkout(r, sessions, addDays(todayStr(), 1)) : null;
 
   const onDelete = async () => {
     if (!confirm(`Delete the routine “${r.name}”? Logged workouts stay in your calendar.`)) return;
@@ -73,6 +76,24 @@ function Editor({ initial }: { initial: Routine }) {
         <span>Routine name</span>
         <input className="input" value={r.name} maxLength={40} onChange={(e) => update({ ...r, name: e.target.value })} onBlur={() => !r.name.trim() && update({ ...r, name: 'Routine' })} />
       </label>
+
+      {r.days.length > 1 && (
+        <label className="field">
+          <span>Next workout</span>
+          <select
+            className="input"
+            value={nextNow?.day.id ?? ''}
+            onChange={(e) => update({ ...r, next: { dayId: e.target.value, date: todayStr(), setAt: Date.now() } })}
+          >
+            {r.days.map((d, i) => (
+              <option key={d.id} value={d.id}>
+                {i + 1}. {d.name}
+              </option>
+            ))}
+          </select>
+          <span className="small muted" style={{ fontWeight: 400 }}>Wrong one? Pick where you are; the plan carries on from there.</span>
+        </label>
+      )}
 
       {routines.length > 1 && (
         <button className={`btn ${isActive ? 'soft' : 'outline'} block`} onClick={() => setActiveRoutine(isActive ? null : r.id)}>
@@ -168,7 +189,7 @@ function ExercisePicker({ selected, onChange, onClose }: { selected: string[]; o
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (
-    <Sheet label="Choose exercises" onClose={onClose}>
+    <Sheet tall label="Choose exercises" onClose={onClose}>
       <div className="between">
         <h2 className="h2">Choose exercises</h2>
         <button className="btn primary sm" onClick={onClose}>

@@ -233,6 +233,8 @@ textarea.input { height: auto; min-height: 72px; padding: 12px 14px; resize: ver
   padding: 10px 20px calc(var(--safe-bottom) + 20px) 20px; gap: 14px; overflow-y: auto;
   animation: rise 0.2s ease-out;
 }
+.sheet.tall { height: calc(100dvh - 48px); }
+.sheet.tall > * { flex-shrink: 0; }
 .sheet .handle { width: 40px; height: 5px; border-radius: 3px; background: #d5d8de; align-self: center; flex-shrink: 0; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(24px); opacity: 0.6; } }

@@ -162,6 +162,11 @@ export async function deleteRoutine(id: string): Promise<void> {
   });
 }
 
+/** "My next workout is X" — the suggestion and the plan continue from it. */
+export async function setNextWorkout(routineId: string, dayId: string, date: DateStr): Promise<void> {
+  await db.routines.update(routineId, { next: { dayId, date, setAt: Date.now() } });
+}
+
 export async function setActiveRoutine(id: string | null): Promise<void> {
   if (id === null) await db.meta.delete('activeRoutineId');
   else await db.meta.put({ key: 'activeRoutineId', value: id });

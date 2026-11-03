@@ -162,7 +162,7 @@ export function ProgressScreen({ exerciseId }: { exerciseId?: string }) {
       </div>
 
       {picking && (
-        <Sheet label="Choose exercise" onClose={() => setPicking(false)}>
+        <Sheet tall label="Choose exercise" onClose={() => setPicking(false)}>
           <h2 className="h2">Choose exercise</h2>
           <div className="list">
             {tracked.map((t) => (

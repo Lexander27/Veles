@@ -157,3 +157,35 @@ describe('routine plan', () => {
     expect(planDays({ ...routine, plan: undefined }, [], '2026-11-02', '2026-11-30')).toEqual([]);
   });
 });
+
+describe('picking the next workout by hand', () => {
+  const days = ['w1', 'w2', 'w3'].map((id) => ({ id, name: id.toUpperCase(), exerciseIds: [] }));
+  const base: Routine = { id: 'r', name: 'R', createdAt: 0, days, plan: { pattern: [true, false] } };
+  const s = (date: string, dayId: string, createdAt = 0): Session => ({ id: date + dayId, date, dayId, routineId: 'r', createdAt });
+
+  it('wins over the cycle, and the plan continues from it', () => {
+    // Workout 1 was logged by hand (no session), so the app would say W1 again.
+    const r = { ...base, next: { dayId: 'w2', date: '2026-11-03', setAt: 100 } };
+    expect(nextWorkout(r, [], '2026-11-03')?.day.id).toBe('w2');
+    expect(planDays(r, [], '2026-11-03', '2026-11-07').map((p) => p.day.id)).toEqual(['w2', 'w3', 'w1']);
+  });
+
+  it('keeps the rest gap after your last workout', () => {
+    const r = { ...base, next: { dayId: 'w3', date: '2026-11-03', setAt: 100 } };
+    const plan = planDays(r, [s('2026-11-02', 'w1')], '2026-11-03', '2026-11-06');
+    expect(plan.map((p) => `${p.date.slice(8)}:${p.day.id}`)).toEqual(['04:w3', '06:w1']);
+  });
+
+  it('stops applying once you train after picking it', () => {
+    const r = { ...base, next: { dayId: 'w2', date: '2026-11-03', setAt: 100 } };
+    const sessions = [s('2026-11-03', 'w2', 200)];
+    expect(nextWorkout(r, sessions, '2026-11-04')?.day.id).toBe('w3');
+    // A session from earlier the same day doesn't cancel it.
+    expect(nextWorkout(r, [s('2026-11-03', 'w1', 50)], '2026-11-04')?.day.id).toBe('w2');
+  });
+
+  it('does not affect days before it was set', () => {
+    const r = { ...base, next: { dayId: 'w3', date: '2026-11-03', setAt: 100 } };
+    expect(nextWorkout(r, [], '2026-11-01')?.day.id).toBe('w1');
+  });
+});

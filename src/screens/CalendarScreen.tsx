@@ -1,8 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useRef, useState } from 'react';
-import { db, startRoutineDay } from '../db';
+import type { Routine } from '../lib/types';
+import { db, setNextWorkout, startRoutineDay } from '../db';
 import { useExercises, useRoutines } from '../hooks';
-import { IconBack, IconDumbbell, IconNext, IconPlus, IconRepeat } from '../components/Icons';
+import { IconBack, IconCheck, IconDumbbell, IconNext, IconPlus, IconRepeat } from '../components/Icons';
+import { Sheet } from '../components/Sheet';
 import { toast } from '../components/Toast';
 import { addDays, formatLong, formatRelative, monthGrid, monthName, parseDate, todayStr, WEEKDAY_SHORT, type DateStr } from '../lib/dates';
 import { summarizeSets, validSets } from '../lib/metrics';
@@ -141,6 +143,7 @@ function DayPanel({ date }: { date: DateStr }) {
   const routines = useLiveQuery(() => db.routines.toArray(), []);
 
   const today = todayStr();
+  const [choosing, setChoosing] = useState(false);
   const daySessions = (sessions ?? []).filter((s) => s.date === date);
   const next = active && sessions ? nextWorkout(active, sessions, date) : null;
   const hasRoutineSession = daySessions.some((s) => s.routineId === active?.id);
@@ -201,9 +204,9 @@ function DayPanel({ date }: { date: DateStr }) {
                 {next?.last ? ` · last: ${active.days.find((d) => d.id === next.last!.dayId)?.name ?? '—'}, ${formatRelative(next.last.date)}` : ''}
               </span>
             </div>
-            <span className="tile" style={{ background: '#fff' }}>
+            <button className="icon-btn" style={{ border: 'none', background: '#fff', color: 'var(--accent)' }} aria-label="Change which workout is next" onClick={() => setChoosing(true)}>
               <IconRepeat size={20} />
-            </span>
+            </button>
           </div>
           {suggestion.day.exerciseIds.length > 0 && (
             <div className="chips">
@@ -234,6 +237,9 @@ function DayPanel({ date }: { date: DateStr }) {
               )}
             </span>
           </div>
+          <button className="btn plain sm" style={{ alignSelf: 'flex-start', padding: 0, height: 32 }} onClick={() => setChoosing(true)}>
+            <IconRepeat size={16} /> Change which workout is next
+          </button>
           {next && next.day.exerciseIds.length > 0 && (
             <button className="btn outline block" onClick={async () => {
               await startRoutineDay(date, active, next.day.id);
@@ -272,6 +278,42 @@ function DayPanel({ date }: { date: DateStr }) {
           })}
         </div>
       ))}
+
+      {choosing && active && (
+        <NextChooser
+          routine={active}
+          current={(planned ?? nextPlanned ?? next)?.day.id}
+          onClose={() => setChoosing(false)}
+          onPick={async (dayId) => {
+            await setNextWorkout(active.id, dayId, date < today ? date : today);
+            setChoosing(false);
+            toast(`Next workout: ${active.days.find((d) => d.id === dayId)?.name}. The plan continues from here`);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** "Which workout is next?" — moves the cycle (and the plan) to the one you pick. */
+export function NextChooser({ routine, current, onPick, onClose }: { routine: Routine; current?: string; onPick: (dayId: string) => void; onClose: () => void }) {
+  return (
+    <Sheet label="Which workout is next?" onClose={onClose}>
+      <div className="stack" style={{ gap: 4 }}>
+        <h2 className="h2">Which workout is next?</h2>
+        <span className="small muted" style={{ lineHeight: 1.5 }}>
+          Pick where you are in {routine.name}. The suggestion and the plan carry on from the one you choose.
+        </span>
+      </div>
+      <div className="list">
+        {routine.days.map((d, i) => (
+          <button key={d.id} className="list-row" style={{ minHeight: 56 }} aria-pressed={d.id === current} onClick={() => onPick(d.id)}>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--accent)', width: 22 }}>{i + 1}</span>
+            <span className="grow" style={{ fontWeight: d.id === current ? 700 : 500 }}>{d.name}</span>
+            {d.id === current && <IconCheck size={18} style={{ color: 'var(--accent)' }} />}
+          </button>
+        ))}
+      </div>
+    </Sheet>
   );
 }

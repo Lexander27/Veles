@@ -213,7 +213,7 @@ function MergeSheet({ source, onClose, onDone }: { source: Exercise; onClose: ()
   };
 
   return (
-    <Sheet label={`Merge ${source.name}`} onClose={onClose}>
+    <Sheet tall label={`Merge ${source.name}`} onClose={onClose}>
       <div className="stack" style={{ gap: 4 }}>
         <h2 className="h2">Merge “{source.name}” into…</h2>
         <span className="small muted">Pick the main exercise to keep. Its name stays; “{source.name}” becomes another name for it.</span>
