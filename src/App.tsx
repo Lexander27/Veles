@@ -8,6 +8,7 @@ import { AddSheet } from './screens/AddSheet';
 import { CalendarScreen } from './screens/CalendarScreen';
 import { EntryScreen } from './screens/EntryScreen';
 import { ExercisesScreen } from './screens/ExercisesScreen';
+import { ImportScreen } from './screens/ImportScreen';
 import { MoreScreen } from './screens/MoreScreen';
 import { ProgressScreen } from './screens/ProgressScreen';
 import { RoutineEditScreen } from './screens/RoutineEditScreen';
@@ -84,6 +85,9 @@ export function App() {
       break;
     case 'exercises':
       screen = <ExercisesScreen />;
+      break;
+    case 'import':
+      screen = <ImportScreen />;
       break;
     default:
       tab = 'cal';

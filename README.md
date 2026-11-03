@@ -6,7 +6,9 @@ An offline workout tracker for your phone. Log your sets on a calendar, follow a
 - **Routines:** build a cycle such as *Push → Pull → Legs*. The calendar suggests the **next workout**: the day after the last one you logged, wrapping around to day 1. Rest days don't move the cycle.
 - **Logging:** kg × reps, or reps for bodyweight exercises. It shows what you did last time, can copy it, saves as you type, and flags new personal records.
 - **Progress graph:** switch between top weight, estimated 1RM and volume. Pick 1M / 3M / 6M / 1Y / All, drag sideways (or use the arrows) to move through time, and tap a point to see its value and date.
-- **Your data stays on the phone.** Nothing is sent anywhere. Export and import a backup file under **More**.
+- **Import from notes:** paste old workouts written like `Lat pulldown 25x12 50x10` under a date line (`26/10/2026`). Every name gets matched to your exercises before anything is saved. Days with notes in parentheses, or lines it can't read (like a run), are flagged so you can import, skip or edit them. Imports can be undone.
+- **Also known as:** an exercise can have several names, and two exercises can be merged into one, which moves the history over.
+- **Your data stays on the phone.** Nothing is sent anywhere. Export and restore a backup file under **More**, which also has *Delete all workouts* and *Reset everything*.
 
 ## Install on Android
 

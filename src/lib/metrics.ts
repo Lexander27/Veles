@@ -66,7 +66,7 @@ export function seriesFor(entries: Entry[], metric: Metric): Point[] {
   const points: Point[] = [];
   for (const [date, sets] of byDate) {
     const value = setMetric(sets, metric);
-    if (value !== null) points.push({ date, value: Math.round(value * 10) / 10 });
+    if (value !== null) points.push({ date, value: Math.round(value * 100) / 100 });
   }
   return points.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
@@ -80,7 +80,7 @@ export function bestSet(sets: WorkSet[]): WorkSet | null {
 
 export function formatNumber(n: number): string {
   if (Number.isInteger(n)) return n.toLocaleString('en-GB');
-  return n.toLocaleString('en-GB', { maximumFractionDigits: 1 });
+  return n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
 }
 
 export function formatSet(s: WorkSet, kind: ExerciseKind): string {

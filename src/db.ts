@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { DateStr } from './lib/dates';
-import type { Entry, Exercise, ExerciseKind, Meta, Routine, Session, WorkSet } from './lib/types';
+import { nameKey } from './lib/importNotes';
+import type { Entry, Exercise, ExerciseKind, ImportRecord, Meta, Routine, Session, WorkSet } from './lib/types';
 
 export class VelesDB extends Dexie {
   exercises!: EntityTable<Exercise, 'id'>;
@@ -17,6 +18,11 @@ export class VelesDB extends Dexie {
       routines: 'id, name',
       sessions: 'id, date, routineId',
       meta: 'key',
+    });
+    // v2: track which entries/exercises came from a notes import.
+    this.version(2).stores({
+      exercises: 'id, name, muscle, archived, importId',
+      entries: 'id, date, exerciseId, sessionId, importId, [exerciseId+date]',
     });
   }
 }
@@ -176,6 +182,137 @@ export async function startRoutineDay(date: DateStr, routine: Routine, dayId: st
     }
     return session;
   });
+}
+
+// ---------- merging & aliases ----------
+
+/**
+ * Folds `sourceId` into `targetId`: its history moves over, routines point at
+ * the target, and its names become the target's "also known as" names.
+ */
+export async function mergeExercises(sourceId: string, targetId: string, database: VelesDB = db): Promise<void> {
+  if (sourceId === targetId) return;
+  await database.transaction('rw', database.exercises, database.entries, database.routines, async () => {
+    const [source, target] = await Promise.all([database.exercises.get(sourceId), database.exercises.get(targetId)]);
+    if (!source || !target) throw new Error('Exercise not found');
+    await database.entries.where('exerciseId').equals(sourceId).modify({ exerciseId: targetId });
+    const routines = await database.routines.toArray();
+    for (const r of routines) {
+      if (!r.days.some((d) => d.exerciseIds.includes(sourceId))) continue;
+      r.days = r.days.map((d) => ({ ...d, exerciseIds: [...new Set(d.exerciseIds.map((id) => (id === sourceId ? targetId : id)))] }));
+      await database.routines.put(r);
+    }
+    const aliases = mergeAliases(target, [source.name, ...(source.aliases ?? [])]);
+    await database.exercises.update(targetId, { aliases });
+    await database.exercises.delete(sourceId);
+  });
+}
+
+/** Target's aliases plus new names, without duplicates of each other or of the main name. */
+export function mergeAliases(target: Pick<Exercise, 'name' | 'aliases'>, names: string[]): string[] {
+  const seen = new Set([nameKey(target.name)]);
+  const out: string[] = [];
+  for (const n of [...(target.aliases ?? []), ...names]) {
+    const k = nameKey(n);
+    if (!n.trim() || seen.has(k)) continue;
+    seen.add(k);
+    out.push(n.trim());
+  }
+  return out;
+}
+
+// ---------- import from notes ----------
+
+export interface ImportPlan {
+  newExercises: Array<{ key: string; name: string; muscle: string; kind: ExerciseKind; aliases: string[] }>;
+  addAliases: Array<{ exerciseId: string; alias: string }>;
+  entries: Array<{ date: DateStr; exercise: { id: string } | { newKey: string }; sets: WorkSet[]; note?: string }>;
+}
+
+export async function runImport(plan: ImportPlan, database: VelesDB = db): Promise<ImportRecord> {
+  const importId = newId();
+  return database.transaction('rw', database.exercises, database.entries, database.meta, async () => {
+    const now = Date.now();
+    const created = new Map<string, string>();
+    for (const [i, n] of plan.newExercises.entries()) {
+      const id = newId();
+      created.set(n.key, id);
+      await database.exercises.add({ id, name: n.name, muscle: n.muscle, kind: n.kind, archived: false, createdAt: now + i, aliases: n.aliases, importId });
+    }
+    const addedAliases: ImportRecord['addedAliases'] = [];
+    for (const a of plan.addAliases) {
+      const ex = await database.exercises.get(a.exerciseId);
+      if (!ex) continue;
+      const aliases = mergeAliases(ex, [a.alias]);
+      if (aliases.length > (ex.aliases ?? []).length) {
+        await database.exercises.update(ex.id, { aliases });
+        addedAliases.push(a);
+      }
+    }
+    const orderByDate = new Map<DateStr, number>();
+    let n = 0;
+    for (const e of plan.entries) {
+      const exerciseId = 'id' in e.exercise ? e.exercise.id : created.get(e.exercise.newKey);
+      if (!exerciseId) continue;
+      if (!orderByDate.has(e.date)) {
+        const existing = await database.entries.where('date').equals(e.date).toArray();
+        orderByDate.set(e.date, existing.reduce((m, x) => Math.max(m, x.order), -1) + 1);
+      }
+      const order = orderByDate.get(e.date)!;
+      orderByDate.set(e.date, order + 1);
+      await database.entries.add({ id: newId(), date: e.date, exerciseId, order, sets: e.sets, note: e.note, importId, createdAt: now + n++ });
+    }
+    const record: ImportRecord = {
+      id: importId,
+      at: now,
+      days: new Set(plan.entries.map((e) => e.date)).size,
+      entries: n,
+      createdExerciseIds: [...created.values()],
+      addedAliases,
+    };
+    const list = ((await database.meta.get('imports'))?.value as ImportRecord[] | undefined) ?? [];
+    await database.meta.put({ key: 'imports', value: [record, ...list] });
+    return record;
+  });
+}
+
+/** Removes everything an import added. Exercises it created are kept only if you've used them since. */
+export async function undoImport(importId: string, database: VelesDB = db): Promise<void> {
+  await database.transaction('rw', database.exercises, database.entries, database.routines, database.meta, async () => {
+    const list = ((await database.meta.get('imports'))?.value as ImportRecord[] | undefined) ?? [];
+    const record = list.find((r) => r.id === importId);
+    await database.entries.where('importId').equals(importId).delete();
+    const routines = await database.routines.toArray();
+    const inRoutine = new Set(routines.flatMap((r) => r.days.flatMap((d) => d.exerciseIds)));
+    for (const ex of await database.exercises.where('importId').equals(importId).toArray()) {
+      const used = (await database.entries.where('exerciseId').equals(ex.id).count()) > 0 || inRoutine.has(ex.id);
+      if (!used) await database.exercises.delete(ex.id);
+    }
+    for (const a of record?.addedAliases ?? []) {
+      const ex = await database.exercises.get(a.exerciseId);
+      if (ex?.aliases) await database.exercises.update(ex.id, { aliases: ex.aliases.filter((x) => x !== a.alias) });
+    }
+    await database.meta.put({ key: 'imports', value: list.filter((r) => r.id !== importId) });
+  });
+}
+
+// ---------- deleting ----------
+
+/** Deletes every logged workout (and routine progress). Exercises and routines stay. */
+export async function deleteAllWorkouts(database: VelesDB = db): Promise<void> {
+  await database.transaction('rw', database.entries, database.sessions, database.meta, async () => {
+    await database.entries.clear();
+    await database.sessions.clear();
+    await database.meta.delete('imports');
+  });
+}
+
+/** Back to a fresh install: everything deleted, starter exercises restored. */
+export async function resetEverything(database: VelesDB = db): Promise<void> {
+  await database.transaction('rw', [database.exercises, database.entries, database.routines, database.sessions, database.meta], async () => {
+    await Promise.all([database.exercises.clear(), database.entries.clear(), database.routines.clear(), database.sessions.clear(), database.meta.clear()]);
+  });
+  await ensureSeeded(database);
 }
 
 // ---------- backup ----------
